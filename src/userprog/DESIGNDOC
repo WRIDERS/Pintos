@@ -1,0 +1,504 @@
+		     +--------------------------+
+       	 |		       CSL373		 
+		     | PROJECT 2: USER PROGRAMS	|
+		     | 	   DESIGN DOCUMENT     	|
+		     +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Mohammad Waseem  <cs1100227@cse.iitd.ernet.in>
+Ashesh 	         <cs5100276@cse.iitd.ernet.in> 
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+
+
+
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+
+For argument passing no new struct or global variable is used .
+Most of the code is written using local variables .
+
+
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+
+For argument passing following modifications are done to the user stack in 
+the order mentioned below :
+
+1-> First of all command line string is copied on the stack in reverse order deleting any repetetive space(' ')
+    and inserting '/0' between them.
+
+    Example : 
+    String "Hello World" will be pushed on the stack in following way
+               '\0' 'd' 'l' 'r' 'o' 'W' '\0' 'o' 'l' 'l' 'e' 'H' 
+        	 ^					      ^
+        	 |					      |
+              PHYSBASE					      esp	
+
+
+2-> Then some extra null bits are done to align esp to granularity of 4 bytes.
+
+    Example:
+    String "Hello World" will be pushed on the stack in following way
+               '\0' 'd' 'l' 'r' 'o' 'W' '\0' 'o' 'l' 'l' 'e' 'H' '\0' '\0'
+        	 ^					      ^    ^    ^
+        	 |					      |    |    |
+              PHYSBASE					      esp  PADDING	
+
+3-> After padding corresponding 4 bytes address to arguments are loaded on the stack one by one .
+
+    Example:
+    String "Hello World" will be pushed on the stack in following way
+               '\0' 'd' 'l' 'r' 'o' 'W' '\0' 'o' 'l' 'l' 'e' 'H' '\0' '\0' NULL ARG(N-1) ARG(N-2) ....... ARG0
+        	 ^					      ^    ^    ^  
+        	 |					      |    |    |
+              PHYSBASE					      esp  PADDING 	
+    
+    
+4-> After pushing all the addresses argv and argc are pushed
+    
+    Example:
+    String "Hello World" will be pushed on the stack in following way
+               '\0' 'd' 'l' 'r' 'o' 'W' '\0' 'o' 'l' 'l' 'e' 'H' '\0' '\0' NULL ARG(N-1) ARG(N-2) ....... ARG0 ARGV ARGC
+        	 ^					      ^    ^    ^
+        	 |					      |    |    |
+              PHYSBASE					      esp  PADDING
+
+
+5-> Finally a FAKE return statement is pushed on stack and system switches to user mode.
+    
+
+As of now kernel stack size is fixed at the time of thread allocation and cannot be extended on 
+demand so we must make sure that filename along arguments is not too big to overflow our stack .
+    
+    
+    
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+   
+   Pintos being a multi threaded system is not compatible with strtok().
+   strtok() saves it state internally so if context switch happens then it will lead to
+   unexpected behaviour whereas strtok_r doesnt save anything internally so it is thread safe
+   i.e. two threads can use it .
+   
+   
+   
+   
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+
+One advantage is better security as shell can filter out error prone commands befre passing it to kernel.
+Other advantage is speed as Kernel will have to perform more sanity checks on the input.
+Whereas shell can be a little free about the checks and let Kernel handle exceptions if any.
+
+
+
+
+
+
+
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+
+****************thread.h("/src/threads/thread.h")******************
+
+Some changes were made to struct thread  in thread.c for synchronization and 
+status code purposes.
+
+  		 
+#define invalid_ret_status   // this is return_status of a thread when wait is successful on that thread. Prevents further wait() 
+			     //calls.		 
+#define default_ret_status   //this is default return_status of a thread	
+  		 			
+struct thread {
+		
+		----struct list childrenlist;		
+		----struct list_elem child;				
+			/*
+			For every thread t,'childrenlist' is the list which contains the 'struct list_elem child' element of all threads 
+			which are 
+			children of thread t. It is used  in process_wait() to ascertain whether the pid passed to wait corrosponds to a thread 
+			which
+			 is child of current thread.
+			*/
+		----uint32_t return_status;
+			/*
+			For every thread 'return_status'contans the return value which is generally set by SYS_EXIT function call. while calling 
+			wait , this variable is used to know whether the thread on which wait is called has finished 
+			its work and is about to 
+			exit or is still RUNNABLE.
+			Full description is given in description of process_wait();
+			*/
+		 ----struct semaphore wait;
+		 	/*
+		 	For a thread ttt, the semaphore structure is 'sema_down'  by any thread which wants to wait till thread ttt does certain 
+		 	expected
+		 	things. thread ttt 'sema_up' its own 'semaphore element' after doing those things.
+		 	
+		 	'semaphore wait' is used by process_wait() to wait for child to exit..
+		 	'semaphore exec' is used by SYSTEM CALL EXEC to ensure that parent returns only after 'knowing' whether the child about to 
+		 	be 
+		 	created is actually created or not.
+		 	*/
+		------struct semaphore exec; 
+			   /*
+			   This semaphore is used for synchronization purposes in SYS_EXEC.
+			   Parent waits on child's semaphore till child loads its binary which then releases the semaphore 
+			   and parent's thread resumes
+		   	   */
+        
+		 ------struct thread *parent;   
+			  //A reference to the parent used by child   in EXEC to pass loadStatus to parent 
+
+
+		 -------bool childLoad ;
+		       // Set by child process depending on whether child's load succeeded or not
+		    
+		    
+		 ------void* myExecutable;
+		      //  Every running process opens its executable and denies write to  it till it 
+		      //  completes  its execution . This variable is used to store the file* of 
+		      //  its own executable and used during thread exit .
+      
+
+
+
+   		  	
+		}
+
+
+
+****************syscall.c(src/userprog/syscall.c)******************
+
+struct lock syscall_lock;
+	//Used for locking in filesystem open,read,write and remove
+	//lock acquire and release take this as input.
+
+***************file.c(src/filesys/sile.c)*********************
+bool 
+file_get_write_status (struct file *file)
+	//Used for checking whether a file is writable or not.
+	//Used mainly for debugging purposes.
+ 
+
+
+
+
+
+
+
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+File descriptors acts as an index in FDArray of every process 
+which stores general information(in Pintos struct file) about every file opened by 
+corresponding process .
+File Descriptors are unique within a single process .
+
+
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+
+FUNCTIONS USED: 
+		static int fill_arg( uint32_t *array1,int sys_num, uint8_t *esp);				IN src/userprog/syscall.c
+		static  int read_arg32(const uint8_t *uaddr);							IN src/userprog/syscall.c
+		bool invalid(const uint8_t * uaddr);								IN src/userprog/syscall.c
+		static int get_user (const uint8_t *uaddr)							IN src/userprog/syscall.c
+		
+DESCRIPTION:
+		static int get_user (const uint8_t *uaddr):
+		 //It gets 1 byte value stored at the memory addess uaddr, 
+		 //padds  24 bits left to value to make it a 4 byte  and returns int value.
+	
+		bool invalid(const uint8_t * uaddr);
+			/*
+			It takes in a address passed by user, checks following things:
+				1) whether it is null
+				2) whether it is above PHYS_BASE
+				3) whether this vertual address is mapped in the current page directory.
+			In any of above cases turns to be true , it kills the thread by calling thread_exit().
+			Before killing it sets its 'return_status' to -1;
+			*/
+			
+		static  int read_arg32(const uint8_t *uaddr);
+			//This reads 4 bytes starting at uaddr by iteratiely calling invalid() follwed by get_user() four times.
+						
+		static int fill_arg( uint32_t *array1,int sys_num, uint8_t *esp);
+			//It fills arguments in array1, passed for system call which has number SYS_NUM.
+	
+CONTROL FLOW:
+		SYSTEM CALL HANDLER calls fill_arg(). this function calls read_arg32() to read  4 bytes of data from memory.
+		read_arg32() reads 1 byte at a time, and concatenating the result,returns a 4 byte data. before reading each byte 
+		valid() is  called to check the validity of user virtual address.
+		before writing also , invalid is called to check that user virtual address is valid.
+
+
+
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+In my implementation 4096 times pagedir_get_page() will get called.
+For every access to user virtual memory, there is a validity check.
+So if a system call copies 2 byte of  data ,validity check is done 2 times.
+But in ideal case ,for best case senario , single inspection of page table
+is sufficient.(since each page table points to a chunk of 4KB, AND if starting address is 
+at page boundary..). In all other cases 2 inspections are sufficient.
+
+Yes there is significant amount of improvement possible. if a contiguous chunk of memory 
+is to be accessed by kernel thread, with size of chunk<=4KB, atmost 2 inspections are sufficient.
+But since our system calls are not using any such chunk transfer operation, it is not implemented 
+by us.
+. 
+
+
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+
+
+System call wait calls process_wait(), with tid as argument.
+In process_wait(), we find thread ,say tt,corrospponding to the  passed tid in the children list
+of current process. this is accomplished through get_chld_tid().
+	/**
+		struct thread *get_chld_tid(tid_t child_tid,struct list *a_list );
+				//It returns pointer to thread whose tid is child_tid. It searches in 'a_list'.
+				//It returns null if it doesn't find the corrosponding thread. 
+	**/
+Cases:
+	1) if tt is null => there is no thread which is child of current process
+		So, simply returns -1; (there may be a thread which has that pid, but isn't 
+		child of the thread which has caled wait.)
+	2) if return_status of tt is invalid_ret_status => some thread has done wait on it
+		successfully, so return -1.	
+	3) otherwise, parent blocks itself by calling sema_down() on tt 's semaphore wait element.
+		when any process exits, it  calls sema_up() on its own semaphore wait element and then blocks 
+		itself. Due to call to sema up on tt 's wait element, parent gets unblocked. It then retrieves return_value of
+		 thread tt, sets the retun_status of tt to invalid_default_status  and returns the former value after unblocking the child 
+		 thread (here, tt). 
+		This way, before thread tt has exited, if another wait is called on it, then since the return_status had been set to invalid
+		when wait was succesful on it, 	wait immediately returns -1;
+		Blocking of thread is required after it does sema_up while exiting, because, otherwise, it may completely destroy itself before
+		parent(thread which calle wait on it) gets to run. So when parent recovers from sema_down() on child's wait element, 
+		it can't access child's return_status, because thread structure has been wiped out.
+
+
+
+
+
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+
+
+Our checks in system calls ensures that every derefrencing of user memory is 
+backed up by a lookup in page directory.
+Locking of resources is done only after these checks are passed so that there are nothing
+unpleasent while lock is held .
+
+Whenever any such situation comes due to bad-pointer (after the thread has formed) at any point in
+its execution,	thread_exit() is called. This function frees all the  file structs pointed to by elements in
+FDArray and calls process_exit() which frees the page directory page and all pagetable pages of that thread. 
+This implementation helps to keep the code clean from multiple error checking code snippets.
+
+
+*One of the important memory optimization which we implemented in thread_exit is to free up 
+ all the  file structs pointed to by elements in FDArray.
+ This optimization is mainly responsible for passing of multi-oom test in our system.
+
+
+
+
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+
+For ensuring this we have used semaphores(defined in threads/synch.c) to block
+the parent untill child successfully loads its executable .
+After child successfully loads its executable it sets the load status 
+in its parents thread and unblocks the parent which will then read the load status 
+from its own context .
+
+Following steps are executed :
+1-> EXEC is called  which then calls process_execute() which creates a new thread 
+    and adds it to runnable queue .
+    
+2-> After calling process_execute() parent blocks(sema_down()) itself and waits for the newly born thread to unblock it .
+
+3-> When newly created thread becomes RUNNING  it calls start_process() which then loads the executable
+    and passes the load status to parent thread and unblocks(sema_down()) the parent thread .
+
+4-> After this parent and child can run independent of each other .
+    Child continues and parent return with load status to user mode.
+
+
+
+
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+
+
+	 "P calls wait(C) before C exits"
+	 In wait() P calls sema_down() on its child's 'struct semaphore wait'.
+	 Since child hasn't called sema_up()  on its own 'struct semaphore wait' yet,
+	 wait.value is zero and parent is blocked. Only when child does sema_up(),
+	 parent is the single entity in  waiters list of 'struct semaphore wait'
+	 and so is unblocked then.
+
+	 "P calls wait(C) after C exits"
+	 in thread_exit(), C calls sema_up() on its own 'struct semaphore wait' and then blocks
+	 itself. When P calls wait(C), parent does'nt get blocked in calling sema_down() on 
+	 C's 'struct semaphore wait' (since wait.value==1).Then after getting return_status of C
+	 it unblocks C, therby facilitaing its death.
+	 
+	 In both case after C gets unblocked, it destroys its page-directory page, page-table
+	 pages and also frees file descriptors.
+	 
+	 "P terminates without waiting, before C exits?"
+	 In this case C executes normally. Only when it exits, it gets blocked and never is unblocked.
+	 Basically it is a orphan process which turns to zombie process.
+	
+	"P terminates without waiting, after C exits?"
+	After C calls thread_exit() it is blocked and emains blocked since parent doesn't called
+	wait on it. It is a zombie process.
+
+
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+
+	Before accessing a user VA, we checked its correctness.
+	We choose this way because it was a neat,simple yet effective implementation.
+	
+
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+
+We have used an array to implement FileDescriptors .
+
+Advantages :
+->Faster access . 
+ 
+Disadvantage :
+->Excesss Memory Usage .
+->Limitation on Max no of open files .
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+We didn't change it . In our implementation pid is equal to tid .
+Since pintos process runs on a single thread ie,  our pintos doesn't support multithreading
+there is a bijection between pid and tid so no point in keeping different mappings.
+
+
+
+
+
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+Level of the assignment was just sufficient not being too hard but still being challenging
+at times . Considering the nature of course time invested in this project was worth it and 
+involved a lot of thinking process .
+
+
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+
+During the initial phase of project setting up our local machine environment 
+was very time consuming and I found project page to be outdated and had to 
+move to various blogs for direction which took a lot of time.
+
+
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+
+
+
+>> Any other comments?
